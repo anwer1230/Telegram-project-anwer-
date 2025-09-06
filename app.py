@@ -10,8 +10,15 @@ from telethon.errors import SessionPasswordNeededError, PhoneNumberInvalidError
 import asyncio
 import threading
 from threading import Lock
-import eventlet
-eventlet.monkey_patch()
+import os
+import json
+import uuid
+import time
+import logging
+
+# استبدال eventlet بـ gevent
+from gevent import monkey
+monkey.patch_all()
 
 # إعدادات التسجيل
 logging.basicConfig(level=logging.INFO)
@@ -19,8 +26,10 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+# تغيير async_mode إلى gevent
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
 
+# باقي الكود يبقى كما هو...
 SESSIONS_DIR = "sessions"
 if not os.path.exists(SESSIONS_DIR):
     os.makedirs(SESSIONS_DIR)
