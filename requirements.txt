@@ -1,7 +1,6 @@
 Flask==2.3.3
 Flask-SocketIO==5.3.6
 python-socketio==5.8.0
-telethon>=1.32.0
-eventlet==0.33.3
+telethon==1.28.5
+eventlet==0.33.4
 python-dotenv==1.0.0
-filetype==1.2.0
