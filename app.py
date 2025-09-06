@@ -10,6 +10,8 @@ from telethon.errors import SessionPasswordNeededError, PhoneNumberInvalidError
 import asyncio
 import threading
 from threading import Lock
+import eventlet
+eventlet.monkey_patch()
 
 # إعدادات التسجيل
 logging.basicConfig(level=logging.INFO)
@@ -24,8 +26,8 @@ if not os.path.exists(SESSIONS_DIR):
     os.makedirs(SESSIONS_DIR)
 
 USERS = {}
-USERS_LOCK = Lock()  # لمنع حالة تنافسية عند الوصول إلى USERS
-ADMIN_PASSWORD = "admin123"  # يجب تغيير هذا في بيئة الإنتاج
+USERS_LOCK = Lock()
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
 
 # ===========================
 # تحميل جميع الجلسات عند البدء
@@ -281,17 +283,16 @@ def api_save_login():
     
     try:
         # استخدام eventlet لتنفيذ async functions
-        import eventlet
-        eventlet.monkey_patch()
-        
         with eventlet.Timeout(30):  # timeout after 30 seconds
-            result = eventlet.import_patched('app').setup_telegram_client(
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            result = loop.run_until_complete(setup_telegram_client(
                 user_id, 
                 settings['phone'], 
                 settings['api_id'], 
                 settings['api_hash'],
                 settings.get('password')
-            )
+            ))
         
         if result["status"] == "success":
             client = result["client"]
@@ -313,7 +314,7 @@ def api_save_login():
             return {"success": False, "message": f"❌ خطأ: {result.get('message', 'Unknown error')}"}
             
     except Exception as e:
-        return {"success": False, "message": f"❌ خطأ: {str(e)}"})
+        return {"success": False, "message": f"❌ خطأ: {str(e)}"}
 
 @app.route("/api/verify_code", methods=["POST"])
 def api_verify_code():
@@ -327,18 +328,17 @@ def api_verify_code():
         return {"success": False, "message": "❌ لم يتم حفظ بيانات الدخول بعد"}
     
     try:
-        import eventlet
-        eventlet.monkey_patch()
-        
         with eventlet.Timeout(30):
-            result = eventlet.import_patched('app').setup_telegram_client(
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            result = loop.run_until_complete(setup_telegram_client(
                 user_id, 
                 settings['phone'], 
                 settings['api_id'], 
                 settings['api_hash'],
                 settings.get('password'),
                 code
-            )
+            ))
         
         if result["status"] == "success":
             client = result["client"]
@@ -356,7 +356,7 @@ def api_verify_code():
             return {"success": False, "message": f"❌ فشل التحقق: {result.get('message', 'Unknown error')}"}
             
     except Exception as e:
-        return {"success": False, "message": f"❌ خطأ: {str(e)}"})
+        return {"success": False, "message": f"❌ خطأ: {str(e)}"}
 
 @app.route("/api/save_settings", methods=["POST"])
 def api_save_settings():
@@ -544,11 +544,648 @@ INDEX_HTML = """
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <style>
-        /* الأنماط كما في الكود السابق */
+        :root {
+            --primary: #4e73df;
+            --secondary: #6f42c1;
+            --success: #1cc88a;
+            --info: #36b9cc;
+            --warning: #f6c23e;
+            --danger: #e74a3b;
+            --light: #f8f9fc;
+            --dark: #5a5c69;
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background-color: #f8f9fc;
+            color: #333;
+            line-height: 1.6;
+            padding: 0;
+            margin: 0;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            color: white;
+            padding: 15px 20px;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            position: relative;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .connection-status {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: var(--danger);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+        }
+        
+        .connection-status.connected {
+            background: var(--success);
+        }
+        
+        .connection-status i {
+            margin-right: 5px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 0 20px;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+        
+        .card-header {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            color: white;
+            padding: 15px 20px;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .card-body {
+            padding: 20px;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: var(--dark);
+        }
+        
+        input, textarea, select {
+            width: 100%;
+            padding: 10px 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            transition: border 0.3s;
+        }
+        
+        input:focus, textarea:focus, select:focus {
+            border-color: var(--primary);
+            outline: none;
+        }
+        
+        textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+        
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background 0.3s;
+            text-align: center;
+        }
+        
+        .btn:hover {
+            background: var(--secondary);
+        }
+        
+        .btn-success {
+            background: var(--success);
+        }
+        
+        .btn-success:hover {
+            background: #17a673;
+        }
+        
+        .btn-danger {
+            background: var(--danger);
+        }
+        
+        .btn-danger:hover {
+            background: #d52a1a;
+        }
+        
+        .btn-warning {
+            background: var(--warning);
+            color: #000;
+        }
+        
+        .btn-warning:hover {
+            background: #f4b619;
+        }
+        
+        .flex-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .flex-buttons .btn {
+            flex: 1;
+        }
+        
+        .icons-container {
+            display: flex;
+            justify-content: space-around;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+        
+        .icon-box {
+            text-align: center;
+            padding: 20px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            margin: 10px;
+            flex: 1;
+            min-width: 250px;
+        }
+        
+        .icon-box i {
+            font-size: 40px;
+            margin-bottom: 15px;
+            color: var(--primary);
+        }
+        
+        .log-container {
+            background: #2e3440;
+            color: #d8dee9;
+            padding: 15px;
+            border-radius: 5px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 5px;
+            border-bottom: 1px solid #4c566a;
+        }
+        
+        .stats-container {
+            display: flex;
+            justify-content: space-around;
+            text-align: center;
+        }
+        
+        .stat-box {
+            padding: 15px;
+        }
+        
+        .stat-number {
+            font-size: 24px;
+            font-weight: bold;
+            color: var(--primary);
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .footer {
+            text-align: center;
+            padding: 20px;
+            background: var(--dark);
+            color: white;
+            margin-top: 40px;
+        }
+        
+        @media (max-width: 768px) {
+            .flex-buttons {
+                flex-direction: column;
+            }
+            
+            .icons-container {
+                flex-direction: column;
+            }
+            
+            .stats-container {
+                flex-direction: column;
+            }
+        }
     </style>
 </head>
 <body>
-    <!-- المحتوى كما في الكود السابق -->
+    <div class="header">
+        <div class="connection-status" id="connectionStatus">
+            <i class="fas fa-times-circle"></i> غير متصل
+        </div>
+        <h1>نظام التليجرام الآلي</h1>
+        <button class="btn btn-danger" onclick="logout()"><i class="fas fa-sign-out-alt"></i> خروج</button>
+    </div>
+    
+    <div class="container">
+        <!-- إعدادات الدخول -->
+        <div class="card" id="loginSettings">
+            <div class="card-header">
+                <span><i class="fas fa-sign-in-alt"></i> إعدادات الدخول إلى Telegram</span>
+            </div>
+            <div class="card-body">
+                <div class="form-group">
+                    <label for="phone">رقم الهاتف:</label>
+                    <input type="text" id="phone" placeholder="+1234567890">
+                </div>
+                <div class="form-group">
+                    <label for="api_id">API ID:</label>
+                    <input type="text" id="api_id">
+                </div>
+                <div class="form-group">
+                    <label for="api_hash">API Hash:</label>
+                    <input type="text" id="api_hash">
+                </div>
+                <div class="form-group">
+                    <label for="password">كلمة المرور (اختياري):</label>
+                    <input type="password" id="password">
+                </div>
+                <button class="btn" onclick="saveLogin()"><i class="fas fa-check"></i> موافق</button>
+                
+                <div id="codeSection" class="hidden">
+                    <div class="form-group" style="margin-top: 20px;">
+                        <label for="code">كود التحقق:</label>
+                        <input type="text" id="code" placeholder="أدخل الكود المرسل إلى Telegram">
+                    </div>
+                    <button class="btn" onclick="verifyCode()"><i class="fas fa-check"></i> تأكيد الكود</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- إعدادات التشغيل -->
+        <div class="card hidden" id="operationSettings">
+            <div class="card-header">
+                <span><i class="fas fa-cog"></i> إعدادات التشغيل</span>
+            </div>
+            <div class="card-body">
+                <div class="form-group">
+                    <label for="message">الرسالة التي سترسل:</label>
+                    <textarea id="message" placeholder="أدخل الرسالة التي تريد إرسالها إلى المجموعات"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="groups">روابط المجموعات (كل رابط في سطر):</label>
+                    <textarea id="groups" placeholder="https://t.me/group1&#10;https://t.me/group2"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="interval_seconds">الوقت بين每一轮发送 (بالثواني):</label>
+                    <input type="number" id="interval_seconds" value="3600">
+                </div>
+                <div class="form-group">
+                    <label for="watch_words">كلمات المراقبة (كل كلمة في سطر):</label>
+                    <textarea id="watch_words" placeholder="كلمة1&#10;كلمة2"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="send_type">نوع الإرسال:</label>
+                    <select id="send_type">
+                        <option value="manual">يدوي</option>
+                        <option value="automatic">تلقائي</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="max_retries">أقصى عدد من المحاولات الفاشلة:</label>
+                    <input type="number" id="max_retries" value="5">
+                </div>
+                <div class="form-group">
+                    <label for="auto_reconnect">إعادة الاتصال التلقائي عند بدء التشغيل:</label>
+                    <select id="auto_reconnect">
+                        <option value="false">لا</option>
+                        <option value="true">نعم</option>
+                    </select>
+                </div>
+                <button class="btn" onclick="saveSettings()"><i class="fas fa-save"></i> حفظ الإعدادات</button>
+            </div>
+        </div>
+        
+        <!-- أيقونات التحكم -->
+        <div class="icons-container hidden" id="controlIcons">
+            <div class="icon-box">
+                <i class="fas fa-paper-plane"></i>
+                <h3>الإرسال</h3>
+                <p>إرسال الرسائل إلى المجموعات</p>
+                <div class="flex-buttons">
+                    <button class="btn btn-success" onclick="sendNow()"><i class="fas fa-bolt"></i> إرسال فوري</button>
+                    <button class="btn" id="toggleAutoSend" onclick="toggleAutoSend()"><i class="fas fa-robot"></i> تشغيل تلقائي</button>
+                </div>
+            </div>
+            
+            <div class="icon-box">
+                <i class="fas fa-binoculars"></i>
+                <h3>المراقبة</h3>
+                <p>مراقبة المجموعات للكلمات المحددة</p>
+                <div class="flex-buttons">
+                    <button class="btn btn-success" onclick="startMonitoring()"><i class="fas fa-play"></i> بدء المراقبة</button>
+                    <button class="btn btn-danger" onclick="stopMonitoring()"><i class="fas fa-stop"></i> إيقاف المراقبة</button>
+                </div>
+            </div>
+            
+            <div class="icon-box">
+                <i class="fas fa-chart-bar"></i>
+                <h3>الإحصائيات</h3>
+                <div class="stats-container">
+                    <div class="stat-box">
+                        <div class="stat-number" id="sentCount">0</div>
+                        <div>الرسائل المرسلة</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-number" id="errorCount">0</div>
+                        <div>الأخطاء</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- سجل الأحداث -->
+        <div class="card">
+            <div class="card-header">
+                <span><i class="fas fa-history"></i> سجل الأحداث</span>
+            </div>
+            <div class="card-body">
+                <div class="log-container" id="logContainer"></div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="footer">
+        تصميم وتنفيذ أنور سيف، خصيصا لمركز سرعة انجاز 📚 للخدمات الطلابية والاكاديمية
+    </div>
+
+    <script>
+        const socket = io();
+        const userId = "{{ user_id }}";
+        let isConnected = "{{ connection_status }}" === "connected";
+        
+        // انضمام إلى غرفة Socket.io
+        socket.emit('join', {user_id: userId});
+        
+        // تحديث حالة الاتصال
+        socket.on('connection_status', function(data) {
+            isConnected = data.status === 'connected';
+            updateConnectionStatus(isConnected);
+        });
+        
+        // تحديث السجل
+        socket.on('log_update', function(data) {
+            addLogEntry(data.message);
+        });
+        
+        // تحديث الإحصائيات
+        socket.on('stats_update', function(data) {
+            updateStats(data);
+        });
+        
+        // تحديث حالة الاتصال في الواجهة
+        function updateConnectionStatus(connected) {
+            const statusElement = document.getElementById('connectionStatus');
+            if (connected) {
+                statusElement.innerHTML = '<i class="fas fa-check-circle"></i> متصل';
+                statusElement.classList.add('connected');
+                
+                // إخفاء إعدادات الدخول وإظهار إعدادات التشغيل وأيقونات التحكم
+                document.getElementById('loginSettings').classList.add('hidden');
+                document.getElementById('operationSettings').classList.remove('hidden');
+                document.getElementById('controlIcons').classList.remove('hidden');
+            } else {
+                statusElement.innerHTML = '<i class="fas fa-times-circle"></i> غير متصل';
+                statusElement.classList.remove('connected');
+            }
+        }
+        
+        // إضافة مدخل إلى السجل
+        function addLogEntry(message) {
+            const logContainer = document.getElementById('logContainer');
+            const logEntry = document.createElement('div');
+            logEntry.className = 'log-entry';
+            logEntry.textContent = `${new Date().toLocaleTimeString()} - ${message}`;
+            logContainer.appendChild(logEntry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+        
+        // تحديث الإحصائيات
+        function updateStats(data) {
+            document.getElementById('sentCount').textContent = data.sent || 0;
+            document.getElementById('errorCount').textContent = data.errors || 0;
+        }
+        
+        // حفظ بيانات الدخول
+        function saveLogin() {
+            const phone = document.getElementById('phone').value;
+            const api_id = document.getElementById('api_id').value;
+            const api_hash = document.getElementById('api_hash').value;
+            const password = document.getElementById('password').value;
+            
+            fetch('/api/save_login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({phone, api_id, api_hash, password})
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    addLogEntry(data.message);
+                    if (data.code_required) {
+                        document.getElementById('codeSection').classList.remove('hidden');
+                    } else if (data.password_required) {
+                        addLogEntry('يطلب كلمة المرور الثانية');
+                    } else {
+                        updateConnectionStatus(true);
+                    }
+                } else {
+                    addLogEntry(data.message);
+                }
+            })
+            .catch(error => {
+                addLogEntry('خطأ في الاتصال: ' + error);
+            });
+        }
+        
+        // التحقق من الكود
+        function verifyCode() {
+            const code = document.getElementById('code').value;
+            
+            fetch('/api/verify_code', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({code})
+            })
+            .then(response => response.json())
+            .then(data => {
+                addLogEntry(data.message);
+                if (data.success) {
+                    document.getElementById('codeSection').classList.add('hidden');
+                    updateConnectionStatus(true);
+                }
+            })
+            .catch(error => {
+                addLogEntry('خطأ في الاتصال: ' + error);
+            });
+        }
+        
+        // حفظ الإعدادات
+        function saveSettings() {
+            const message = document.getElementById('message').value;
+            const groups = document.getElementById('groups').value;
+            const interval_seconds = document.getElementById('interval_seconds').value;
+            const watch_words = document.getElementById('watch_words').value;
+            const send_type = document.getElementById('send_type').value;
+            const max_retries = document.getElementById('max_retries').value;
+            const auto_reconnect = document.getElementById('auto_reconnect').value;
+            
+            fetch('/api/save_settings', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({message, groups, interval_seconds, watch_words, send_type, max_retries, auto_reconnect})
+            })
+            .then(response => response.json())
+            .then(data => {
+                addLogEntry(data.message);
+            })
+            .catch(error => {
+                addLogEntry('خطأ في الاتصال: ' + error);
+            });
+        }
+        
+        // بدء المراقبة
+        function startMonitoring() {
+            fetch('/api/start_monitoring', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                addLogEntry(data.message);
+                document.getElementById('toggleAutoSend').classList.add('btn-success');
+                document.getElementById('toggleAutoSend').innerHTML = '<i class="fas fa-robot"></i> إيقاف تلقائي';
+            })
+            .catch(error => {
+                addLogEntry('خطأ في الاتصال: ' + error);
+            });
+        }
+        
+        // إيقاف المراقبة
+        function stopMonitoring() {
+            fetch('/api/stop_monitoring', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                addLogEntry(data.message);
+                document.getElementById('toggleAutoSend').classList.remove('btn-success');
+                document.getElementById('toggleAutoSend').innerHTML = '<i class="fas fa-robot"></i> تشغيل تلقائي';
+            })
+            .catch(error => {
+                addLogEntry('خطأ في الاتصال: ' + error);
+            });
+        }
+        
+        // إرسال فوري
+        function sendNow() {
+            fetch('/api/send_now', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                addLogEntry(data.message);
+            })
+            .catch(error => {
+                addLogEntry('خطأ في الاتصال: ' + error);
+            });
+        }
+        
+        // تبديل الإرسال التلقائي
+        function toggleAutoSend() {
+            const btn = document.getElementById('toggleAutoSend');
+            if (btn.classList.contains('btn-success')) {
+                stopMonitoring();
+            } else {
+                startMonitoring();
+            }
+        }
+        
+        // تسجيل الخروج
+        function logout() {
+            if (confirm('هل تريد تسجيل الخروج؟')) {
+                fetch('/api/logout', {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    addLogEntry(data.message);
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1000);
+                })
+                .catch(error => {
+                    addLogEntry('خطأ في الاتصال: ' + error);
+                });
+            }
+        }
+        
+        // تحميل الإحصائيات عند بدء التحميل
+        window.onload = function() {
+            fetch('/api/get_stats')
+            .then(response => response.json())
+            .then(data => {
+                updateStats(data);
+            });
+            
+            // تحديث حالة الاتصال الأولية
+            updateConnectionStatus(isConnected);
+            
+            // إذا كان متصلاً، إخفاء إعدادات الدخول
+            if (isConnected) {
+                document.getElementById('loginSettings').classList.add('hidden');
+                document.getElementById('operationSettings').classList.remove('hidden');
+                document.getElementById('controlIcons').classList.remove('hidden');
+            }
+            
+            // تحميل الإعدادات إذا كانت موجودة
+            const settings = {{ settings | tojson }};
+            if (settings.phone) document.getElementById('phone').value = settings.phone;
+            if (settings.api_id) document.getElementById('api_id').value = settings.api_id;
+            if (settings.api_hash) document.getElementById('api_hash').value = settings.api_hash;
+            if (settings.message) document.getElementById('message').value = settings.message;
+            if (settings.groups) document.getElementById('groups').value = settings.groups.join('\n');
+            if (settings.interval_seconds) document.getElementById('interval_seconds').value = settings.interval_seconds;
+            if (settings.watch_words) document.getElementById('watch_words').value = settings.watch_words.join('\n');
+            if (settings.send_type) document.getElementById('send_type').value = settings.send_type;
+            if (settings.max_retries) document.getElementById('max_retries').value = settings.max_retries;
+            if (settings.auto_reconnect) document.getElementById('auto_reconnect').value = settings.auto_reconnect.toString();
+        };
+    </script>
 </body>
 </html>
 """
@@ -562,7 +1199,54 @@ ADMIN_HTML = """
     <title>لوحة التحكم - المشرف</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        /* أنماط خاصة بلوحة المشرف */
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fc;
+            margin: 0;
+            padding: 0;
+        }
+        .header {
+            background: linear-gradient(135deg, #4e73df 0%, #6f42c1 100%);
+            color: white;
+            padding: 15px 20px;
+            text-align: center;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 0 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
+        }
+        th, td {
+            padding: 12px 15px;
+            text-align: right;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #4e73df;
+            color: white;
+        }
+        tr:hover {
+            background-color: #f5f5f5;
+        }
+        .btn {
+            padding: 8px 15px;
+            background: #4e73df;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
@@ -606,7 +1290,47 @@ ADMIN_LOGIN_HTML = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>تسجيل الدخول - المشرف</title>
     <style>
-        /* أنماط صفحة تسجيل الدخول */
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fc;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .login-container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
+            width: 300px;
+            text-align: center;
+        }
+        h2 {
+            color: #4e73df;
+            margin-bottom: 20px;
+        }
+        input {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        button {
+            width: 100%;
+            padding: 10px;
+            background: #4e73df;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .error {
+            color: #e74a3b;
+            margin-bottom: 10px;
+        }
     </style>
 </head>
 <body>
