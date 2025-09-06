@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: telegram-bot-manager
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ADMIN_PASSWORD
+        value: your-secure-password-here
